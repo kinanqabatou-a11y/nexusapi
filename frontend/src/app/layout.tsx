@@ -10,7 +10,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_BASE_URL || "https://nexusapi.dev"
+    process.env.NEXT_PUBLIC_BASE_URL || "https://nexusapi-gamma.vercel.app"
   ),
   title:
     "NexusAPI - APIs para automatizar tu negocio | Documentos, Video IA, Datos",
