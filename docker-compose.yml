@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-autoapi_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autoapi_password}
+      POSTGRES_DB: ${POSTGRES_DB:-autoapi_db}
+    ports:
+      - "5432:5432"
+    networks:
+      - autoapi_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoapi_user} -d ${POSTGRES_DB:-autoapi_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-autoapi_redis}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - autoapi_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-autoapi_redis}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-autoapi_user}:${POSTGRES_PASSWORD:-autoapi_password}@postgres:5432/${POSTGRES_DB:-autoapi_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-autoapi_redis}@redis:6379/0
+    ports:
+      - "8000:8000"
+    networks:
+      - autoapi_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./frontend/.env
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    networks:
+      - autoapi_network
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  autoapi_network:
+    driver: bridge

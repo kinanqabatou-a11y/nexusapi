@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly no
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: builder
+    command: >
+      sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app"
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/venv
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-autoapi_user}:${POSTGRES_PASSWORD:-autoapi_password}@postgres:5432/${POSTGRES_DB:-autoapi_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-autoapi_redis}@redis:6379/0
+      DEBUG: "true"
+    ports:
+      - "8000:8000"
+      - "5678:5678"
+    networks:
+      - autoapi_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: builder
+    command: npm run dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    env_file:
+      - ./frontend/.env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    networks:
+      - autoapi_network
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_venv:
+
+networks:
+  autoapi_network:
+    driver: bridge
