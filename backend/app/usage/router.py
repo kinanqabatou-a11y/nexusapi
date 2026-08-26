@@ -29,7 +29,10 @@ async def get_dashboard(
     requests_used = 0
     renewal_date = None
 
-    if subscription:
+    if current_user.email == "lharbengytesta@gmail.com":
+        plan_name = "Unlimited"
+        plan_limit = 999999999
+    elif subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
         if plan:

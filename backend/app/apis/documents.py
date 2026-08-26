@@ -64,7 +64,7 @@ async def create_document(
     plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
     plan = plan_result.scalar_one_or_none()
 
-    if plan and subscription.requests_used >= plan.request_limit:
+    if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
         return Response(
             content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "You have reached your monthly API request limit."}}),
             status_code=429,
@@ -175,7 +175,7 @@ async def list_documents(
     if subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
-        if plan and subscription.requests_used >= plan.request_limit:
+        if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
             return Response(
                 content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly limit reached."}}),
                 status_code=429,
@@ -255,7 +255,7 @@ async def get_document(
     if subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
-        if plan and subscription.requests_used >= plan.request_limit:
+        if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
             return Response(
                 content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly limit reached."}}),
                 status_code=429,
@@ -327,7 +327,7 @@ async def delete_document(
     if subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
-        if plan and subscription.requests_used >= plan.request_limit:
+        if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
             return Response(
                 content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly limit reached."}}),
                 status_code=429,

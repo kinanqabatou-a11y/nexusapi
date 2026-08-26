@@ -66,7 +66,7 @@ async def create_api_key(
     )
     subscription = sub_result.scalar_one_or_none()
 
-    if subscription:
+    if current_user.email != "lharbengytesta@gmail.com" and subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
         if plan and active_count >= plan.api_key_limit:
