@@ -46,30 +46,31 @@ async def create_document(
     user_result = await db.execute(select(User).where(User.id == api_key.user_id))
     user = user_result.scalar_one_or_none()
 
-    sub_result = await db.execute(
-        select(Subscription).join(Plan).where(
-            Subscription.user_id == user.id,
-            Subscription.status == "active",
+    if user.email != "lharbengytesta@gmail.com":
+        sub_result = await db.execute(
+            select(Subscription).join(Plan).where(
+                Subscription.user_id == user.id,
+                Subscription.status == "active",
+            )
         )
-    )
-    subscription = sub_result.scalar_one_or_none()
+        subscription = sub_result.scalar_one_or_none()
 
-    if not subscription:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "NO_ACTIVE_SUBSCRIPTION", "message": "No active subscription found."}}),
-            status_code=403,
-            media_type="application/json",
-        )
+        if not subscription:
+            return Response(
+                content=json.dumps({"success": False, "error": {"code": "NO_ACTIVE_SUBSCRIPTION", "message": "No active subscription found."}}),
+                status_code=403,
+                media_type="application/json",
+            )
 
-    plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
-    plan = plan_result.scalar_one_or_none()
+        plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
+        plan = plan_result.scalar_one_or_none()
 
-    if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "You have reached your monthly API request limit."}}),
-            status_code=429,
-            media_type="application/json",
-        )
+        if plan and subscription.requests_used >= plan.request_limit:
+            return Response(
+                content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "You have reached your monthly API request limit."}}),
+                status_code=429,
+                media_type="application/json",
+            )
 
     try:
         body = await request.json()
@@ -175,7 +176,7 @@ async def list_documents(
     if subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
-        if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
+        if user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
             return Response(
                 content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly limit reached."}}),
                 status_code=429,
@@ -184,7 +185,8 @@ async def list_documents(
 
     # In production, documents would be stored in DB. For now return demo data
     api_key.last_used_at = datetime.utcnow()
-    subscription.requests_used += 1
+    if subscription:
+        subscription.requests_used += 1
 
     api_request = ApiRequest(
         user_id=user.id,
@@ -255,7 +257,7 @@ async def get_document(
     if subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
-        if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
+        if user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
             return Response(
                 content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly limit reached."}}),
                 status_code=429,
@@ -327,7 +329,7 @@ async def delete_document(
     if subscription:
         plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
         plan = plan_result.scalar_one_or_none()
-        if current_user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
+        if user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
             return Response(
                 content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly limit reached."}}),
                 status_code=429,

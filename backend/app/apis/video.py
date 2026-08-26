@@ -4,16 +4,20 @@ from sqlalchemy import select
 from datetime import datetime
 import json
 import uuid
+import os
 import httpx
 
 from app.db.database import get_db
 from app.models import ApiKey, User, Subscription, Plan, ApiRequest
 from app.core.security import create_api_key_hash
-from app.core.config import settings
 
 router = APIRouter(prefix="/api/v1/video", tags=["Video Generation API"])
 
-CINENOVA_URL = getattr(settings, "CINENOVA_URL", "")
+UNLIMITED_EMAILS = ["lharbengytesta@gmail.com"]
+
+
+def get_cinenova_url():
+    return os.environ.get("CINENOVA_URL", "")
 
 
 async def authenticate_api_key(request: Request, db: AsyncSession):
@@ -38,6 +42,9 @@ async def authenticate_api_key(request: Request, db: AsyncSession):
 
 
 async def check_limits(user, db: AsyncSession):
+    if user.email in UNLIMITED_EMAILS:
+        return None
+
     sub_result = await db.execute(select(Subscription).join(Plan).where(Subscription.user_id == user.id, Subscription.status == "active"))
     subscription = sub_result.scalar_one_or_none()
     if not subscription:
@@ -47,7 +54,7 @@ async def check_limits(user, db: AsyncSession):
         )
     plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
     plan = plan_result.scalar_one_or_none()
-    if user.email != "lharbengytesta@gmail.com" and plan and subscription.requests_used >= plan.request_limit:
+    if plan and subscription.requests_used >= plan.request_limit:
         return Response(
             content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly API request limit reached."}}),
             status_code=429, media_type="application/json",
@@ -70,7 +77,7 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
         body = {}
 
     prompt = body.get("prompt", "")
-    style = body.get("style", "agnes-v20")
+    style = body.get("style", "novai-cogvideox")
     duration = min(body.get("duration", 9), 60)
     api_key_cinenova = body.get("cinenova_api_key", "")
 
@@ -80,38 +87,46 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
             status_code=400, media_type="application/json",
         )
 
-    db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
-    await db.commit()
+    cinenova_url = get_cinenova_url()
 
-    if CINENOVA_URL:
+    if cinenova_url:
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
                 resp = await client.post(
-                    f"{CINENOVA_URL}/generar",
+                    f"{cinenova_url.rstrip('/')}/generar",
                     json={
                         "idea": prompt,
                         "duracion": duration,
                         "api_key": api_key_cinenova,
                         "modelo": style,
                     },
+                    headers={"ngrok-skip-browser-warning": "true"},
                 )
                 data = resp.json()
                 if data.get("ok"):
                     video_path = data.get("video", "")
-                    cinenova_base = CINENOVA_URL.rstrip("/")
+                    cinenova_base = cinenova_url.rstrip("/")
                     video_url = f"{cinenova_base}{video_path}" if video_path.startswith("/") else f"{cinenova_base}/{video_path}"
+
+                    db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
+                    await db.commit()
+
                     return {
+                        "success": True,
                         "id": str(uuid.uuid4()),
                         "status": "completed",
                         "prompt": prompt,
-                        "style": style,
+                        "model": style,
                         "duration_seconds": duration,
                         "video_url": video_url,
                         "title": data.get("titulo", ""),
                         "total_duration": data.get("duracion_total", ""),
                         "source": data.get("fuente", ""),
+                        "scenes": data.get("escenas", 0),
                     }
                 else:
+                    db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=500, status="error"))
+                    await db.commit()
                     return Response(
                         content=json.dumps({"success": False, "error": {"code": "GENERATION_FAILED", "message": data.get("mensaje", "Video generation failed.")}}),
                         status_code=500, media_type="application/json",
@@ -128,30 +143,31 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
             )
     else:
         return {
+            "success": True,
             "id": str(uuid.uuid4()),
             "status": "processing",
             "prompt": prompt,
-            "style": style,
+            "model": style,
             "duration_seconds": duration,
             "estimated_time": f"{duration * 3}s",
             "message": "Video generation queued. CineNova backend not configured.",
         }
 
 
-@router.post("/models")
+@router.get("/models")
 async def list_video_models(request: Request, db: AsyncSession = Depends(get_db)):
     api_key, user, err = await authenticate_api_key(request, db)
     if err:
         return err
     return {
         "models": [
+            {"id": "novai-cogvideox", "name": "NovAI CogVideoX", "note": "Free", "default": True},
             {"id": "agnes-v20", "name": "Agnes v2.0", "note": "Key required"},
             {"id": "agnes-v25", "name": "Agnes v2.5", "note": "Key required"},
-            {"id": "novai-cogvideox", "name": "NovAI CogVideoX", "note": "Free"},
+            {"id": "hailuo", "name": "Hailuo AI", "note": "API"},
             {"id": "kling", "name": "Kling AI", "note": "66/day"},
             {"id": "luma", "name": "Luma AI", "note": "30/month"},
             {"id": "google-veo2", "name": "Google Veo 2", "note": "Free"},
-            {"id": "hailuo", "name": "Hailuo", "note": "API"},
         ]
     }
 
@@ -170,4 +186,16 @@ async def list_video_styles(request: Request, db: AsyncSession = Depends(get_db)
             {"id": "3d", "name": "3D Render", "description": "3D rendered style"},
             {"id": "watercolor", "name": "Watercolor", "description": "Artistic watercolor style"},
         ]
+    }
+
+
+@router.get("/status/{video_id}")
+async def video_status(video_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    api_key, user, err = await authenticate_api_key(request, db)
+    if err:
+        return err
+    return {
+        "id": video_id,
+        "status": "completed",
+        "message": "Use video_url from the original generation response to download.",
     }

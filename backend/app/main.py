@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.db.database import init_db
+from app.seed import seed
 from app.auth.router import router as auth_router
 from app.api_keys.router import router as api_keys_router
 from app.subscriptions.router import router as subscriptions_router
@@ -22,6 +23,7 @@ from app.admin.router import router as admin_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await seed()
     yield
 
 
