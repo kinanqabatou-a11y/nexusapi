@@ -1,15 +1,19 @@
 from fastapi import APIRouter, Request, Response, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 from datetime import datetime
 import json
 import uuid
+import httpx
 
 from app.db.database import get_db
 from app.models import ApiKey, User, Subscription, Plan, ApiRequest
 from app.core.security import create_api_key_hash
+from app.core.config import settings
 
 router = APIRouter(prefix="/api/v1/video", tags=["Video Generation API"])
+
+CINENOVA_URL = getattr(settings, "CINENOVA_URL", "")
 
 
 async def authenticate_api_key(request: Request, db: AsyncSession):
@@ -32,6 +36,7 @@ async def authenticate_api_key(request: Request, db: AsyncSession):
     user = user_result.scalar_one_or_none()
     return api_key, user, None
 
+
 async def check_limits(user, db: AsyncSession):
     sub_result = await db.execute(select(Subscription).join(Plan).where(Subscription.user_id == user.id, Subscription.status == "active"))
     subscription = sub_result.scalar_one_or_none()
@@ -49,16 +54,15 @@ async def check_limits(user, db: AsyncSession):
         )
     return None
 
-def log_request(db, api_key_id, user_id, endpoint, method, status_code):
-    return ApiRequest(api_key_id=api_key_id, user_id=user_id, endpoint=endpoint, method=method, status_code=status_code, status="success" if 200 <= status_code < 300 else "error")
-
 
 @router.post("/generate")
 async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
     api_key, user, err = await authenticate_api_key(request, db)
-    if err: return err
+    if err:
+        return err
     limit_err = await check_limits(user, db)
-    if limit_err: return limit_err
+    if limit_err:
+        return limit_err
 
     try:
         body = await request.json()
@@ -66,10 +70,9 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
         body = {}
 
     prompt = body.get("prompt", "")
-    style = body.get("style", "cinematic")
-    duration = min(body.get("duration", 5), 60)
-    resolution = body.get("resolution", "1080p")
-    aspect_ratio = body.get("aspect_ratio", "16:9")
+    style = body.get("style", "agnes-v20")
+    duration = min(body.get("duration", 9), 60)
+    api_key_cinenova = body.get("cinenova_api_key", "")
 
     if not prompt:
         return Response(
@@ -77,49 +80,84 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
             status_code=400, media_type="application/json",
         )
 
-    video_id = str(uuid.uuid4())
-    db.add(log_request(db, api_key.id, user.id, "/api/v1/video/generate", "POST", 200))
+    db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
     await db.commit()
 
-    return {
-        "id": video_id,
-        "status": "processing",
-        "prompt": prompt,
-        "style": style,
-        "duration_seconds": duration,
-        "resolution": resolution,
-        "aspect_ratio": aspect_ratio,
-        "estimated_time": f"{duration * 3}s",
-        "message": "Video generation started. Poll /video/status/{id} for progress.",
-    }
+    if CINENOVA_URL:
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(
+                    f"{CINENOVA_URL}/generar",
+                    json={
+                        "idea": prompt,
+                        "duracion": duration,
+                        "api_key": api_key_cinenova,
+                        "modelo": style,
+                    },
+                )
+                data = resp.json()
+                if data.get("ok"):
+                    return {
+                        "id": str(uuid.uuid4()),
+                        "status": "completed",
+                        "prompt": prompt,
+                        "style": style,
+                        "duration_seconds": duration,
+                        "video_url": data.get("video", ""),
+                        "title": data.get("titulo", ""),
+                        "total_duration": data.get("duracion_total", ""),
+                        "source": data.get("fuente", ""),
+                    }
+                else:
+                    return Response(
+                        content=json.dumps({"success": False, "error": {"code": "GENERATION_FAILED", "message": data.get("mensaje", "Video generation failed.")}}),
+                        status_code=500, media_type="application/json",
+                    )
+        except httpx.TimeoutException:
+            return Response(
+                content=json.dumps({"success": False, "error": {"code": "TIMEOUT", "message": "Video generation timed out. Try a shorter duration."}}),
+                status_code=504, media_type="application/json",
+            )
+        except Exception as e:
+            return Response(
+                content=json.dumps({"success": False, "error": {"code": "CINENOVA_ERROR", "message": f"Error connecting to CineNova: {str(e)}"}}),
+                status_code=502, media_type="application/json",
+            )
+    else:
+        return {
+            "id": str(uuid.uuid4()),
+            "status": "processing",
+            "prompt": prompt,
+            "style": style,
+            "duration_seconds": duration,
+            "estimated_time": f"{duration * 3}s",
+            "message": "Video generation queued. CineNova backend not configured.",
+        }
 
 
-@router.get("/status/{video_id}")
-async def video_status(video_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+@router.post("/models")
+async def list_video_models(request: Request, db: AsyncSession = Depends(get_db)):
     api_key, user, err = await authenticate_api_key(request, db)
-    if err: return err
-
-    db.add(log_request(db, api_key.id, user.id, f"/api/v1/video/status/{video_id}", "GET", 200))
-    await db.commit()
-
+    if err:
+        return err
     return {
-        "id": video_id,
-        "status": "completed",
-        "progress": 100,
-        "download_url": f"https://api.nexusapi.com/video/{video_id}/download",
-        "format": "mp4",
-        "size_mb": 12.5,
+        "models": [
+            {"id": "agnes-v20", "name": "Agnes v2.0", "note": "Key required"},
+            {"id": "agnes-v25", "name": "Agnes v2.5", "note": "Key required"},
+            {"id": "novai-cogvideox", "name": "NovAI CogVideoX", "note": "Free"},
+            {"id": "kling", "name": "Kling AI", "note": "66/day"},
+            {"id": "luma", "name": "Luma AI", "note": "30/month"},
+            {"id": "google-veo2", "name": "Google Veo 2", "note": "Free"},
+            {"id": "hailuo", "name": "Hailuo", "note": "API"},
+        ]
     }
 
 
 @router.post("/styles")
 async def list_video_styles(request: Request, db: AsyncSession = Depends(get_db)):
     api_key, user, err = await authenticate_api_key(request, db)
-    if err: return err
-
-    db.add(log_request(db, api_key.id, user.id, "/api/v1/video/styles", "POST", 200))
-    await db.commit()
-
+    if err:
+        return err
     return {
         "styles": [
             {"id": "cinematic", "name": "Cinematic", "description": "Professional film-quality output"},
