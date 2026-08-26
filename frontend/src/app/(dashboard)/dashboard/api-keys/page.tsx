@@ -18,9 +18,18 @@ interface ApiKey {
   id: number;
   name: string;
   key_prefix: string;
+  api_id: string | null;
+  api_name: string | null;
   last_used: string | null;
   created_at: string;
   is_active: boolean;
+}
+
+interface AvailableApi {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
 }
 
 interface CreateKeyResponse {
@@ -104,6 +113,8 @@ export default function ApiKeysPage() {
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [availableApis, setAvailableApis] = useState<AvailableApi[]>([]);
+  const [selectedApiId, setSelectedApiId] = useState<string>("");
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -118,6 +129,7 @@ export default function ApiKeysPage() {
 
   useEffect(() => {
     fetchKeys();
+    api.get<{ apis: AvailableApi[] }>("/api-keys/apis/available").then((r) => setAvailableApis(r.apis || [])).catch(() => {});
   }, [fetchKeys]);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -129,9 +141,11 @@ export default function ApiKeysPage() {
     try {
       const result = await api.post<CreateKeyResponse>("/api-keys", {
         name: newKeyName.trim(),
+        api_id: selectedApiId || undefined,
       });
       setCreatedKey(result);
       setNewKeyName("");
+      setSelectedApiId("");
       await fetchKeys();
     } catch (err: unknown) {
       const apiErr = err as { message?: string };
@@ -181,6 +195,7 @@ export default function ApiKeysPage() {
     setShowCreateModal(false);
     setCreatedKey(null);
     setNewKeyName("");
+    setSelectedApiId("");
     setError(null);
   };
 
@@ -244,6 +259,11 @@ export default function ApiKeysPage() {
                       >
                         {key.is_active ? "Active" : "Revoked"}
                       </span>
+                      {key.api_name && (
+                        <span className="inline-block rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          {key.api_name}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-text-muted">
                       <span className="font-mono">{key.key_prefix}****</span>
@@ -402,6 +422,27 @@ export default function ApiKeysPage() {
                     className="w-full rounded-lg border border-border bg-bg-base px-4 py-2.5 text-sm text-text-primary placeholder-text-muted outline-none transition-colors focus:border-primary"
                     autoFocus
                   />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="apiKeyType"
+                    className="mb-1.5 block text-sm font-medium text-text-secondary"
+                  >
+                    API Type (Optional)
+                  </label>
+                  <select
+                    id="apiKeyType"
+                    value={selectedApiId}
+                    onChange={(e) => setSelectedApiId(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-bg-base px-4 py-2.5 text-sm text-text-primary outline-none transition-colors focus:border-primary"
+                  >
+                    <option value="">All APIs (unrestricted)</option>
+                    {availableApis.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-text-muted">Leave empty to allow access to all APIs.</p>
                 </div>
 
                 <div className="flex gap-3">

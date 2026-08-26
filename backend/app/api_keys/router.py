@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.db.database import get_db
-from app.models import ApiKey, User
+from app.models import ApiKey, User, Api
 from app.schemas import ApiKeyCreate, ApiKeyResponse, ApiKeyCreatedResponse
 from app.dependencies import get_current_user
 from app.core.security import generate_api_key, create_api_key_hash
@@ -25,6 +25,12 @@ async def list_api_keys(
     )
     keys = result.scalars().all()
 
+    api_ids = {k.api_id for k in keys if k.api_id}
+    apis_map = {}
+    if api_ids:
+        api_result = await db.execute(select(Api).where(Api.id.in_(api_ids)))
+        apis_map = {a.id: a.name for a in api_result.scalars().all()}
+
     return {
         "api_keys": [
             ApiKeyResponse(
@@ -32,6 +38,8 @@ async def list_api_keys(
                 name=k.name,
                 key_prefix=k.key_prefix,
                 is_active=k.is_active,
+                api_id=k.api_id,
+                api_name=apis_map.get(k.api_id) if k.api_id else None,
                 last_used_at=k.last_used_at,
                 expires_at=k.expires_at,
                 created_at=k.created_at,
@@ -90,6 +98,7 @@ async def create_api_key(
         name=data.name,
         key_prefix=key_prefix,
         key_hash=key_hash,
+        api_id=data.api_id,
     )
     db.add(api_key)
     await db.commit()
@@ -148,3 +157,18 @@ async def delete_api_key(
     await db.commit()
 
     return {"success": True, "message": "API key deleted successfully."}
+
+
+@router.get("/apis/available")
+async def list_available_apis(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Api).where(Api.is_active == True).order_by(Api.name))
+    apis = result.scalars().all()
+    return {
+        "apis": [
+            {"id": a.id, "name": a.name, "slug": a.slug, "description": a.description}
+            for a in apis
+        ]
+    }

@@ -144,6 +144,7 @@ class ApiKey(Base):
     name = Column(String(200), nullable=False)
     key_prefix = Column(String(20), nullable=False)  # e.g. "autoapi_live_a1b2"
     key_hash = Column(String(255), nullable=False)
+    api_id = Column(String(36), ForeignKey("apis.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
@@ -151,6 +152,7 @@ class ApiKey(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="api_keys")
+    api = relationship("Api")
     api_requests = relationship("ApiRequest", back_populates="api_key")
 
 
