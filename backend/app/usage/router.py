@@ -101,22 +101,28 @@ async def get_dashboard(
             "method": r.method,
             "status_code": r.status_code,
             "status": r.status,
-            "created_at": r.created_at.isoformat(),
+            "date": r.created_at.isoformat(),
         }
         for r in recent_result.scalars().all()
     ]
 
     return {
         "user_name": current_user.first_name,
-        "plan_name": plan_name,
-        "subscription_status": subscription.status if subscription else "none",
-        "requests_used": requests_used,
-        "requests_limit": plan_limit,
-        "requests_remaining": max(0, plan_limit - requests_used),
-        "renewal_date": renewal_date.isoformat() if renewal_date else None,
-        "active_api_keys": active_api_keys,
-        "active_apis": active_apis,
-        "usage_last_7_days": daily_usage_7,
-        "usage_last_30_days": daily_usage_30,
+        "plan": {
+            "name": plan_name,
+            "status": subscription.status if subscription else "none",
+        },
+        "usage": {
+            "used": requests_used,
+            "limit": plan_limit,
+            "remaining": max(0, plan_limit - requests_used),
+            "renewal_date": renewal_date.isoformat() if renewal_date else None,
+        },
+        "stats": {
+            "active_api_keys": active_api_keys,
+            "active_apis": active_apis,
+        },
+        "chart_7_days": [{"day": d["date"], "requests": d["requests"]} for d in daily_usage_7],
+        "chart_30_days": [{"day": d["date"], "requests": d["requests"]} for d in daily_usage_30],
         "recent_requests": recent_requests,
     }
