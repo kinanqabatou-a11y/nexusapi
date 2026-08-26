@@ -1,8 +1,18 @@
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" && window.location.hostname !== "localhost"
-    ? "https://nexusapi-backend-ma27.onrender.com/api/v1"
-    : "http://localhost:8000/api/v1");
+const PRODUCTION_API_URL = "https://nexusapi-backend-ma27.onrender.com/api/v1";
+
+export function getBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    return window.location.hostname === "localhost"
+      ? "http://localhost:8000/api/v1"
+      : PRODUCTION_API_URL;
+  }
+  return PRODUCTION_API_URL;
+}
+
+export const BASE_URL = getBaseUrl();
 
 interface ApiError {
   status: number;
@@ -49,7 +59,8 @@ async function request<T>(
     (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
+  const baseUrl = getBaseUrl();
+  const response = await fetch(`${baseUrl}${endpoint}`, {
     ...options,
     headers,
   });

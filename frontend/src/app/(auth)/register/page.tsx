@@ -55,7 +55,8 @@ export default function RegisterPage() {
       await register({
         email,
         password,
-        full_name: `${firstName} ${lastName}`.trim(),
+        first_name: firstName,
+        last_name: lastName,
       });
       router.push("/dashboard");
     } catch (err: any) {

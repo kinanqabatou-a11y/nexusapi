@@ -8,11 +8,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, setToken, removeToken, getToken } from "@/lib/api";
+import { api, setToken, removeToken, getToken, getBaseUrl } from "@/lib/api";
 
 interface User {
   id: number;
   email: string;
+  first_name: string;
+  last_name: string;
   full_name: string;
   is_active: boolean;
   is_superuser: boolean;
@@ -32,7 +34,8 @@ interface LoginCredentials {
 interface RegisterData {
   email: string;
   password: string;
-  full_name: string;
+  first_name: string;
+  last_name: string;
 }
 
 interface AuthContextType {
@@ -78,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     formData.append("password", credentials.password);
 
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/auth/login`,
+      `${getBaseUrl()}/auth/login`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
