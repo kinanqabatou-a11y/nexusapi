@@ -111,8 +111,8 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
                     )
 
             for _ in range(60):
-                time.sleep(5)
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                time.sleep(10)
+                async with httpx.AsyncClient(timeout=60.0) as client:
                     r = await client.get(
                         f"{NOVAI_BASE}/video/generations/{job_id}",
                         headers=headers,
@@ -120,9 +120,14 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
                     )
                     r.raise_for_status()
                     data = r.json()
-                    status = data.get("status", "")
-                    if status == "succeeded":
-                        video_url = data.get("content", {}).get("video_url")
+                    status = data.get("task_status") or data.get("status", "")
+                    if status in ("SUCCESS", "succeeded"):
+                        video_url = None
+                        video_result = data.get("video_result", [])
+                        if video_result and len(video_result) > 0:
+                            video_url = video_result[0].get("url")
+                        if not video_url:
+                            video_url = data.get("content", {}).get("video_url")
                         if video_url:
                             db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
                             await db.commit()
@@ -136,7 +141,7 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
                                 "video_url": video_url,
                                 "title": prompt[:50],
                             }
-                    elif status == "failed":
+                    elif status in ("FAILED", "failed"):
                         return Response(
                             content=json.dumps({"success": False, "error": {"code": "GENERATION_FAILED", "message": "Video generation failed."}}),
                             status_code=500, media_type="application/json",
