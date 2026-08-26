@@ -97,13 +97,15 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
                 )
                 data = resp.json()
                 if data.get("ok"):
+                    video_path = data.get("video", "")
+                    video_url = f"{CINENOVA_URL}{video_path}" if video_path.startswith("/") else f"{CINENOVA_URL}/{video_path}"
                     return {
                         "id": str(uuid.uuid4()),
                         "status": "completed",
                         "prompt": prompt,
                         "style": style,
                         "duration_seconds": duration,
-                        "video_url": data.get("video", ""),
+                        "video_url": video_url,
                         "title": data.get("titulo", ""),
                         "total_duration": data.get("duracion_total", ""),
                         "source": data.get("fuente", ""),
