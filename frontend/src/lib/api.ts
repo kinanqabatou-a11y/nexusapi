@@ -1,18 +1,20 @@
 const PRODUCTION_API_URL = "https://nexusapi-backend-ma27.onrender.com/api/v1";
 
-export function getBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL;
+function computeBaseUrl(): string {
+  if (typeof window === "undefined") {
+    return PRODUCTION_API_URL;
   }
-  if (typeof window !== "undefined") {
-    return window.location.hostname === "localhost"
-      ? "http://localhost:8000/api/v1"
-      : PRODUCTION_API_URL;
+  if (window.location.hostname === "localhost") {
+    return "http://localhost:8000/api/v1";
   }
   return PRODUCTION_API_URL;
 }
 
-export const BASE_URL = getBaseUrl();
+export function getBaseUrl(): string {
+  return computeBaseUrl();
+}
+
+export const BASE_URL = computeBaseUrl();
 
 interface ApiError {
   status: number;
