@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    CINENOVA_URL: str = ""
+    NOVAI_API_KEY: str = ""
 
     FRONTEND_URL: str = "http://localhost:3000"
     BACKEND_URL: str = "http://localhost:8000"
