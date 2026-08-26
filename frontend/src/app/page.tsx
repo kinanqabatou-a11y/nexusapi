@@ -232,7 +232,7 @@ const APIsSection = () => (
                   {api.desc}
                 </p>
                 <a
-                  href="#"
+                  href="/docs"
                   className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-400 transition-colors hover:text-blue-300"
                 >
                   Explorar
@@ -947,7 +947,7 @@ const FinalCTA = () => (
         Crea tu cuenta gratuita en menos de 2 minutos
       </p>
       <a
-        href="#"
+        href="/register"
         className="inline-flex items-center gap-2 rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-black transition-all duration-200 hover:bg-zinc-200"
       >
         Crear cuenta gratis
@@ -984,14 +984,14 @@ export default function Home() {
           </p>
           <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <a
-              href="#"
+              href="/register"
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-7 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-500/25"
             >
               <Play className="h-4 w-4" />
               Comenzar gratis
             </a>
             <a
-              href="#"
+              href="/docs"
               className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-7 py-3 text-sm font-semibold text-white transition-all duration-200 hover:border-zinc-500 hover:bg-zinc-900"
             >
               <Terminal className="h-4 w-4" />
