@@ -9,6 +9,10 @@ from app.auth.router import router as auth_router
 from app.api_keys.router import router as api_keys_router
 from app.subscriptions.router import router as subscriptions_router
 from app.apis.documents import router as documents_router
+from app.apis.video import router as video_router
+from app.apis.image import router as image_router
+from app.apis.tts import router as tts_router
+from app.apis.translate import router as translate_router
 from app.usage.router import router as dashboard_router
 from app.payments.webhooks import router as webhooks_router
 from app.support.router import router as support_router
@@ -79,6 +83,10 @@ app.include_router(auth_router)
 app.include_router(api_keys_router)
 app.include_router(subscriptions_router)
 app.include_router(documents_router)
+app.include_router(video_router)
+app.include_router(image_router)
+app.include_router(tts_router)
+app.include_router(translate_router)
 app.include_router(dashboard_router)
 app.include_router(webhooks_router)
 app.include_router(support_router)

@@ -26,28 +26,71 @@ async def seed():
 
         # APIs
         existing_apis = await db.execute(select(Api))
-        if not existing_apis.scalars().first():
-            apis = [
-                Api(
-                    name="Document API",
-                    slug="document-api",
-                    description="Genera y gestiona documentos JSON de forma sencilla.",
-                    version="1.0.0",
-                    base_path="/api/v1/documents",
-                ),
-            ]
-            db.add_all(apis)
-            await db.flush()
+        existing_slugs = {a.slug for a in existing_apis.scalars().all()}
 
-            doc_api = (await db.execute(select(Api).where(Api.slug == "document-api"))).scalar_one()
-            endpoints = [
-                ApiEndpoint(api_id=doc_api.id, method="POST", path="/api/v1/documents", description="Crear un documento."),
-                ApiEndpoint(api_id=doc_api.id, method="GET", path="/api/v1/documents", description="Listar documentos."),
-                ApiEndpoint(api_id=doc_api.id, method="GET", path="/api/v1/documents/{id}", description="Obtener un documento por ID."),
-                ApiEndpoint(api_id=doc_api.id, method="DELETE", path="/api/v1/documents/{id}", description="Eliminar un documento."),
-            ]
+        apis_to_add = []
+        if "document-api" not in existing_slugs:
+            apis_to_add.append(Api(name="Document API", slug="document-api", description="Genera y gestiona documentos JSON de forma sencilla.", version="1.0.0", base_path="/api/v1/documents"))
+        if "video-api" not in existing_slugs:
+            apis_to_add.append(Api(name="Video Generation API", slug="video-api", description="Genera videos con inteligencia artificial a partir de texto.", version="1.0.0", base_path="/api/v1/video"))
+        if "image-api" not in existing_slugs:
+            apis_to_add.append(Api(name="Image Generation API", slug="image-api", description="Genera imágenes con IA desde prompts de texto.", version="1.0.0", base_path="/api/v1/image"))
+        if "tts-api" not in existing_slugs:
+            apis_to_add.append(Api(name="Text-to-Speech API", slug="tts-api", description="Convierte texto en voz natural con múltiples voces y idiomas.", version="1.0.0", base_path="/api/v1/tts"))
+        if "translation-api" not in existing_slugs:
+            apis_to_add.append(Api(name="Translation API", slug="translation-api", description="Traduce texto entre más de 18 idiomas en tiempo real.", version="1.0.0", base_path="/api/v1/translate"))
+
+        if apis_to_add:
+            db.add_all(apis_to_add)
+            await db.flush()
+            print(f"Added {len(apis_to_add)} new APIs.")
+
+        all_apis = {a.slug: a for a in (await db.execute(select(Api))).scalars().all()}
+
+        existing_endpoints = await db.execute(select(ApiEndpoint))
+        existing_ep_keys = {(e.api_id, e.method, e.path) for e in existing_endpoints.scalars().all()}
+
+        endpoints = []
+        api_configs = [
+            ("document-api", [
+                ("POST", "/api/v1/documents", "Crear un documento."),
+                ("GET", "/api/v1/documents", "Listar documentos."),
+                ("GET", "/api/v1/documents/{id}", "Obtener un documento por ID."),
+                ("DELETE", "/api/v1/documents/{id}", "Eliminar un documento."),
+            ]),
+            ("video-api", [
+                ("POST", "/api/v1/video/generate", "Generar un video desde texto."),
+                ("GET", "/api/v1/video/status/{id}", "Consultar estado del video."),
+                ("POST", "/api/v1/video/styles", "Listar estilos disponibles."),
+            ]),
+            ("image-api", [
+                ("POST", "/api/v1/image/generate", "Generar imagen desde texto."),
+                ("POST", "/api/v1/image/variations", "Crear variaciones de imagen."),
+                ("POST", "/api/v1/image/styles", "Listar estilos de imagen."),
+            ]),
+            ("tts-api", [
+                ("POST", "/api/v1/tts/synthesize", "Sintetizar voz desde texto."),
+                ("POST", "/api/v1/tts/voices", "Listar voces disponibles."),
+                ("POST", "/api/v1/tts/languages", "Listar idiomas soportados."),
+            ]),
+            ("translation-api", [
+                ("POST", "/api/v1/translate", "Traducir texto."),
+                ("POST", "/api/v1/translate/detect", "Detectar idioma del texto."),
+                ("POST", "/api/v1/translate/languages", "Listar idiomas disponibles."),
+            ]),
+        ]
+
+        for slug, eps in api_configs:
+            api = all_apis.get(slug)
+            if not api:
+                continue
+            for method, path, desc in eps:
+                if (api.id, method, path) not in existing_ep_keys:
+                    endpoints.append(ApiEndpoint(api_id=api.id, method=method, path=path, description=desc))
+
+        if endpoints:
             db.add_all(endpoints)
-            print("APIs and endpoints created.")
+            print(f"Added {len(endpoints)} new endpoints.")
 
         # Admin user
         admin_result = await db.execute(select(User).where(User.email == "admin@nexusapi.com"))

@@ -24,7 +24,11 @@ const navSections = [
   { id: "authentication", label: "Authentication", icon: Shield },
   { id: "api-keys", label: "Creating API Keys", icon: Key },
   { id: "first-request", label: "Your First Request", icon: ArrowRight },
-  { id: "document-api", label: "Document API Reference", icon: FileText },
+  { id: "document-api", label: "Document API", icon: FileText },
+  { id: "video-api", label: "Video Generation API", icon: FileText },
+  { id: "image-api", label: "Image Generation API", icon: FileText },
+  { id: "tts-api", label: "Text-to-Speech API", icon: FileText },
+  { id: "translation-api", label: "Translation API", icon: FileText },
   { id: "error-codes", label: "Error Codes", icon: AlertTriangle },
   { id: "rate-limits", label: "Rate Limits", icon: Clock },
   { id: "code-examples", label: "Code Examples", icon: Code2 },
@@ -382,6 +386,95 @@ export default function DocsPage() {
                 code={`curl -X DELETE https://api.nexusapi.dev/api/v1/documents/doc_abc123 \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"`}
               />
+            </section>
+
+            <section id="video-api" className="mb-16 scroll-mt-24">
+              <h2 className="mb-4 text-2xl font-bold text-text-primary">Video Generation API</h2>
+              <p className="mb-6 text-text-secondary">Generate AI-powered videos from text prompts. Supports multiple styles, durations, and resolutions.</p>
+              <div className="space-y-4 mb-8">
+                <EndpointCard method="POST" path="/api/v1/video/generate" description="Generate a video from a text prompt." />
+                <EndpointCard method="GET" path="/api/v1/video/status/:id" description="Check video generation status." />
+                <EndpointCard method="POST" path="/api/v1/video/styles" description="List available video styles." />
+              </div>
+              <CodeBlock language="cURL" code={`curl -X POST https://nexusapi-backend-ma27.onrender.com/api/v1/video/generate \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "prompt": "A sunset over the ocean with waves",
+    "style": "cinematic",
+    "duration": 10,
+    "resolution": "1080p",
+    "aspect_ratio": "16:9"
+  }'`} />
+              <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4">
+                <p className="text-sm text-text-muted"><strong className="text-text-primary">Parameters:</strong> prompt (required), style (cinematic/animation/realistic/anime/3d/watercolor), duration (1-60s), resolution (720p/1080p/4k), aspect_ratio (16:9/9:16/1:1)</p>
+              </div>
+            </section>
+
+            <section id="image-api" className="mb-16 scroll-mt-24">
+              <h2 className="mb-4 text-2xl font-bold text-text-primary">Image Generation API</h2>
+              <p className="mb-6 text-text-secondary">Create stunning images from text descriptions. Generate up to 4 images per request.</p>
+              <div className="space-y-4 mb-8">
+                <EndpointCard method="POST" path="/api/v1/image/generate" description="Generate images from a text prompt." />
+                <EndpointCard method="POST" path="/api/v1/image/variations" description="Create variations of an existing image." />
+                <EndpointCard method="POST" path="/api/v1/image/styles" description="List available image styles." />
+              </div>
+              <CodeBlock language="cURL" code={`curl -X POST https://nexusapi-backend-ma27.onrender.com/api/v1/image/generate \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "prompt": "A futuristic city at night with neon lights",
+    "size": "1024x1024",
+    "style": "vivid",
+    "quality": "hd",
+    "n": 2
+  }'`} />
+              <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4">
+                <p className="text-sm text-text-muted"><strong className="text-text-primary">Parameters:</strong> prompt (required), size (256x256/512x512/1024x1024/1792x1024), style (vivid/natural/anime/oil-painting/pixel-art/3d-render/watercolor), quality (standard/hd), n (1-4)</p>
+              </div>
+            </section>
+
+            <section id="tts-api" className="mb-16 scroll-mt-24">
+              <h2 className="mb-4 text-2xl font-bold text-text-primary">Text-to-Speech API</h2>
+              <p className="mb-6 text-text-secondary">Convert text into natural-sounding speech with multiple voices, languages, and adjustable speed.</p>
+              <div className="space-y-4 mb-8">
+                <EndpointCard method="POST" path="/api/v1/tts/synthesize" description="Convert text to speech audio." />
+                <EndpointCard method="POST" path="/api/v1/tts/voices" description="List available voices." />
+                <EndpointCard method="POST" path="/api/v1/tts/languages" description="List supported languages." />
+              </div>
+              <CodeBlock language="cURL" code={`curl -X POST https://nexusapi-backend-ma27.onrender.com/api/v1/tts/synthesize \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "text": "Welcome to NexusAPI, the future of AI-powered APIs.",
+    "voice": "nova",
+    "speed": 1.0,
+    "response_format": "mp3"
+  }'`} />
+              <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4">
+                <p className="text-sm text-text-muted"><strong className="text-text-primary">Parameters:</strong> text (required), voice (alloy/echo/fable/onyx/nova/shimmer), speed (0.25-4.0), response_format (mp3/opus/aac/flac)</p>
+              </div>
+            </section>
+
+            <section id="translation-api" className="mb-16 scroll-mt-24">
+              <h2 className="mb-4 text-2xl font-bold text-text-primary">Translation API</h2>
+              <p className="mb-6 text-text-secondary">Translate text between 18+ languages in real-time with high accuracy. Also includes language detection.</p>
+              <div className="space-y-4 mb-8">
+                <EndpointCard method="POST" path="/api/v1/translate" description="Translate text to a target language." />
+                <EndpointCard method="POST" path="/api/v1/translate/detect" description="Detect the language of input text." />
+                <EndpointCard method="POST" path="/api/v1/translate/languages" description="List all supported languages." />
+              </div>
+              <CodeBlock language="cURL" code={`curl -X POST https://nexusapi-backend-ma27.onrender.com/api/v1/translate \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "text": "Hello, how are you?",
+    "target_language": "es",
+    "source_language": "en"
+  }'`} />
+              <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4">
+                <p className="text-sm text-text-muted"><strong className="text-text-primary">Parameters:</strong> text (required), target_language (required, e.g. es/fr/de/ja/ko/zh), source_language (optional, auto-detect if omitted)</p>
+              </div>
             </section>
 
             <section id="error-codes" className="mb-16 scroll-mt-24">
