@@ -31,9 +31,22 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+ALLOWED_ORIGINS = [
+    "https://nexusapi-gamma.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+]
+FRONTEND_URL = settings.FRONTEND_URL
+if FRONTEND_URL and FRONTEND_URL != "http://localhost:3000":
+    for url in FRONTEND_URL.split(","):
+        url = url.strip()
+        if url and url not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.FRONTEND_URL.split(","),
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
