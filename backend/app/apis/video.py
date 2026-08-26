@@ -77,7 +77,7 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
         body = {}
 
     prompt = body.get("prompt", "")
-    style = body.get("style", "novai-cogvideox")
+    style = body.get("style", "pollinations")
     duration = min(body.get("duration", 9), 60)
     api_key_cinenova = body.get("cinenova_api_key", "")
 
@@ -161,7 +161,8 @@ async def list_video_models(request: Request, db: AsyncSession = Depends(get_db)
         return err
     return {
         "models": [
-            {"id": "novai-cogvideox", "name": "NovAI CogVideoX", "note": "Free", "default": True},
+            {"id": "pollinations", "name": "Pollinations Wan 3.0", "note": "Free, no key needed", "default": True},
+            {"id": "novai", "name": "NovAI CogVideoX", "note": "Free with API key"},
             {"id": "agnes-v20", "name": "Agnes v2.0", "note": "Key required"},
             {"id": "agnes-v25", "name": "Agnes v2.5", "note": "Key required"},
             {"id": "hailuo", "name": "Hailuo AI", "note": "API"},
