@@ -6,6 +6,7 @@ import json
 import uuid
 import os
 import httpx
+import time
 
 from app.db.database import get_db
 from app.models import ApiKey, User, Subscription, Plan, ApiRequest
@@ -14,10 +15,8 @@ from app.core.security import create_api_key_hash
 router = APIRouter(prefix="/api/v1/video", tags=["Video Generation API"])
 
 UNLIMITED_EMAILS = ["lharbengytesta@gmail.com"]
-
-
-def get_cinenova_url():
-    return os.environ.get("CINENOVA_URL", "")
+NOVAI_BASE = "https://aiapi-pro.com/v1"
+NOVAI_API_KEY = os.environ.get("NOVAI_API_KEY", "")
 
 
 async def authenticate_api_key(request: Request, db: AsyncSession):
@@ -77,9 +76,9 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
         body = {}
 
     prompt = body.get("prompt", "")
-    style = body.get("style", "pollinations")
+    style = body.get("style", "cogvideox-flash")
     duration = min(body.get("duration", 9), 60)
-    api_key_cinenova = body.get("cinenova_api_key", "")
+    api_key_novai = body.get("novai_api_key", "") or NOVAI_API_KEY
 
     if not prompt:
         return Response(
@@ -87,58 +86,74 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
             status_code=400, media_type="application/json",
         )
 
-    cinenova_url = get_cinenova_url()
-
-    if cinenova_url:
+    if api_key_novai:
         try:
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                resp = await client.post(
-                    f"{cinenova_url.rstrip('/')}/generar",
-                    json={
-                        "idea": prompt,
-                        "duracion": duration,
-                        "api_key": api_key_cinenova,
-                        "modelo": style,
-                    },
-                    headers={"ngrok-skip-browser-warning": "true"},
+            headers = {"Authorization": f"Bearer {api_key_novai}", "Content-Type": "application/json"}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                job_resp = await client.post(
+                    f"{NOVAI_BASE}/video/generations",
+                    headers=headers,
+                    json={"model": "cogvideox-flash", "prompt": prompt},
                 )
-                data = resp.json()
-                if data.get("ok"):
-                    video_path = data.get("video", "")
-                    cinenova_base = cinenova_url.rstrip("/")
-                    video_url = f"{cinenova_base}{video_path}" if video_path.startswith("/") else f"{cinenova_base}/{video_path}"
-
-                    db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
-                    await db.commit()
-
-                    return {
-                        "success": True,
-                        "id": str(uuid.uuid4()),
-                        "status": "completed",
-                        "prompt": prompt,
-                        "model": style,
-                        "duration_seconds": duration,
-                        "video_url": video_url,
-                        "title": data.get("titulo", ""),
-                        "total_duration": data.get("duracion_total", ""),
-                        "source": data.get("fuente", ""),
-                        "scenes": data.get("escenas", 0),
-                    }
-                else:
-                    db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=500, status="error"))
-                    await db.commit()
+                if job_resp.status_code in (401, 403):
                     return Response(
-                        content=json.dumps({"success": False, "error": {"code": "GENERATION_FAILED", "message": data.get("mensaje", "Video generation failed.")}}),
+                        content=json.dumps({"success": False, "error": {"code": "INVALID_NOVAI_KEY", "message": "NovAI API key is invalid."}}),
+                        status_code=401, media_type="application/json",
+                    )
+                job_resp.raise_for_status()
+                job_data = job_resp.json()
+                job_id = job_data.get("id")
+                if not job_id:
+                    return Response(
+                        content=json.dumps({"success": False, "error": {"code": "NO_JOB_ID", "message": "Failed to start video generation."}}),
                         status_code=500, media_type="application/json",
                     )
+
+            for _ in range(60):
+                time.sleep(5)
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    r = await client.get(
+                        f"{NOVAI_BASE}/video/generations/{job_id}",
+                        headers=headers,
+                        params={"model": "cogvideox-flash"},
+                    )
+                    r.raise_for_status()
+                    data = r.json()
+                    status = data.get("status", "")
+                    if status == "succeeded":
+                        video_url = data.get("content", {}).get("video_url")
+                        if video_url:
+                            db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
+                            await db.commit()
+                            return {
+                                "success": True,
+                                "id": str(uuid.uuid4()),
+                                "status": "completed",
+                                "prompt": prompt,
+                                "model": "cogvideox-flash",
+                                "duration_seconds": duration,
+                                "video_url": video_url,
+                                "title": prompt[:50],
+                            }
+                    elif status == "failed":
+                        return Response(
+                            content=json.dumps({"success": False, "error": {"code": "GENERATION_FAILED", "message": "Video generation failed."}}),
+                            status_code=500, media_type="application/json",
+                        )
+
+            return Response(
+                content=json.dumps({"success": False, "error": {"code": "TIMEOUT", "message": "Video generation timed out."}}),
+                status_code=504, media_type="application/json",
+            )
         except httpx.TimeoutException:
             return Response(
-                content=json.dumps({"success": False, "error": {"code": "TIMEOUT", "message": "Video generation timed out. Try a shorter duration."}}),
+                content=json.dumps({"success": False, "error": {"code": "TIMEOUT", "message": "Video generation timed out."}}),
                 status_code=504, media_type="application/json",
             )
         except Exception as e:
             return Response(
-                content=json.dumps({"success": False, "error": {"code": "CINENOVA_ERROR", "message": f"Error connecting to CineNova: {str(e)}"}}),
+                content=json.dumps({"success": False, "error": {"code": "NOVAI_ERROR", "message": f"Error: {str(e)}"}}),
                 status_code=502, media_type="application/json",
             )
     else:
@@ -150,7 +165,7 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
             "model": style,
             "duration_seconds": duration,
             "estimated_time": f"{duration * 3}s",
-            "message": "Video generation queued. CineNova backend not configured.",
+            "message": "Video generation queued. Configure NOVAI_API_KEY for real video generation.",
         }
 
 
@@ -161,8 +176,7 @@ async def list_video_models(request: Request, db: AsyncSession = Depends(get_db)
         return err
     return {
         "models": [
-            {"id": "pollinations", "name": "Pollinations Wan 3.0", "note": "Free, no key needed", "default": True},
-            {"id": "novai", "name": "NovAI CogVideoX", "note": "Free with API key"},
+            {"id": "cogvideox-flash", "name": "CogVideoX Flash", "note": "Free via NovAI", "default": True},
             {"id": "agnes-v20", "name": "Agnes v2.0", "note": "Key required"},
             {"id": "agnes-v25", "name": "Agnes v2.5", "note": "Key required"},
             {"id": "hailuo", "name": "Hailuo AI", "note": "API"},
