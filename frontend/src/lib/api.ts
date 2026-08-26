@@ -79,12 +79,17 @@ async function request<T>(
       data = null;
     }
 
+    const detail = (data as any)?.detail;
+    const errorMsg =
+      detail?.error?.message ||
+      (typeof detail === "string" ? detail : null) ||
+      (Array.isArray(detail) ? detail.map((d: any) => d.msg).join(", ") : null) ||
+      response.statusText ||
+      "An error occurred";
+
     const error: ApiError = {
       status: response.status,
-      message:
-        (data as { detail?: string })?.detail ||
-        response.statusText ||
-        "An error occurred",
+      message: errorMsg,
       data,
     };
     throw error;

@@ -76,22 +76,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchUser]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
-    const formData = new URLSearchParams();
-    formData.append("username", credentials.email);
-    formData.append("password", credentials.password);
-
     const response = await fetch(
       `${getBaseUrl()}/auth/login`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString(),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password,
+        }),
       }
     );
 
     if (!response.ok) {
       const error = await response.json().catch(() => null);
-      throw new Error(error?.detail || "Login failed");
+      const msg =
+        error?.detail?.error?.message ||
+        (typeof error?.detail === "string" ? error.detail : null) ||
+        "Login failed";
+      throw new Error(msg);
     }
 
     const data: AuthResponse = await response.json();
