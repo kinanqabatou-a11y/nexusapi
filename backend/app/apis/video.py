@@ -90,25 +90,33 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
         try:
             headers = {"Authorization": f"Bearer {api_key_novai}", "Content-Type": "application/json"}
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                job_resp = await client.post(
-                    f"{NOVAI_BASE}/video/generations",
-                    headers=headers,
-                    json={"model": "cogvideox-flash", "prompt": prompt},
+            job_id = None
+            for attempt in range(5):
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    job_resp = await client.post(
+                        f"{NOVAI_BASE}/video/generations",
+                        headers=headers,
+                        json={"model": "cogvideox-flash", "prompt": prompt},
+                    )
+                    if job_resp.status_code == 429:
+                        wait = 30 * (attempt + 1)
+                        time.sleep(wait)
+                        continue
+                    if job_resp.status_code in (401, 403):
+                        return Response(
+                            content=json.dumps({"success": False, "error": {"code": "INVALID_NOVAI_KEY", "message": "NovAI API key is invalid."}}),
+                            status_code=401, media_type="application/json",
+                        )
+                    job_resp.raise_for_status()
+                    job_data = job_resp.json()
+                    job_id = job_data.get("id")
+                    break
+
+            if not job_id:
+                return Response(
+                    content=json.dumps({"success": False, "error": {"code": "NO_JOB_ID", "message": "Failed to start video generation."}}),
+                    status_code=500, media_type="application/json",
                 )
-                if job_resp.status_code in (401, 403):
-                    return Response(
-                        content=json.dumps({"success": False, "error": {"code": "INVALID_NOVAI_KEY", "message": "NovAI API key is invalid."}}),
-                        status_code=401, media_type="application/json",
-                    )
-                job_resp.raise_for_status()
-                job_data = job_resp.json()
-                job_id = job_data.get("id")
-                if not job_id:
-                    return Response(
-                        content=json.dumps({"success": False, "error": {"code": "NO_JOB_ID", "message": "Failed to start video generation."}}),
-                        status_code=500, media_type="application/json",
-                    )
 
             for _ in range(60):
                 time.sleep(10)
@@ -118,6 +126,9 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
                         headers=headers,
                         params={"model": "cogvideox-flash"},
                     )
+                    if r.status_code == 429:
+                        time.sleep(30)
+                        continue
                     r.raise_for_status()
                     data = r.json()
                     status = data.get("task_status") or data.get("status", "")
