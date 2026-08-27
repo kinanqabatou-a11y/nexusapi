@@ -4,6 +4,8 @@ from sqlalchemy import select
 from datetime import datetime
 import json
 import uuid
+import urllib.parse
+import httpx
 
 from app.db.database import get_db
 from app.models import ApiKey, User, Subscription, Plan, ApiRequest
@@ -45,6 +47,27 @@ async def generate_image(request: Request, db: AsyncSession = Depends(get_db)):
     n = min(body.get("n", 1), 4)
 
     image_id = str(uuid.uuid4())
+
+    images = []
+    for i in range(n):
+        encoded = urllib.parse.quote(prompt[:300])
+        seed = abs(hash(f"{image_id}_{i}")) % 999999
+        w, h = (1024, 1024)
+        if "x" in size:
+            parts = size.split("x")
+            try:
+                w, h = int(parts[0]), int(parts[1])
+            except Exception:
+                pass
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width={w}&height={h}&nologo=true&seed={seed}&model=flux"
+        images.append({
+            "index": i,
+            "url": url,
+            "size": size,
+            "style": style,
+            "quality": quality,
+        })
+
     db.add(ApiRequest(api_key_id=api_key.id, user_id=user.id, endpoint="/api/v1/image/generate", method="POST", status_code=200, status="success"))
     await db.commit()
 
@@ -52,16 +75,7 @@ async def generate_image(request: Request, db: AsyncSession = Depends(get_db)):
         "id": image_id,
         "status": "completed",
         "created_at": datetime.utcnow().isoformat() if hasattr(datetime, 'utcnow') else "",
-        "images": [
-            {
-                "index": i,
-                "url": f"https://api.nexusapi.com/image/{image_id}/{i}",
-                "size": size,
-                "style": style,
-                "quality": quality,
-            }
-            for i in range(n)
-        ],
+        "images": images,
     }
 
 
@@ -89,7 +103,7 @@ async def create_variation(request: Request, db: AsyncSession = Depends(get_db))
     return {
         "id": var_id,
         "status": "completed",
-        "variations": [{"index": i, "url": f"https://api.nexusapi.com/image/{var_id}/var/{i}", "size": size} for i in range(n)],
+        "variations": [{"index": i, "url": f"https://image.pollinations.ai/prompt/variation?width=1024&height=1024&nologo=true&seed={abs(hash(f'{var_id}_{i}'))%999999}&model=flux", "size": size} for i in range(n)],
     }
 
 
