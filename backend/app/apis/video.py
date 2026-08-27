@@ -48,11 +48,12 @@ async def authenticate_with_bypass(request: Request, db: AsyncSession):
         bypass_markers = ["lharbengytesta", "kinanqabatou"]
         if not raw_key or not any(m in raw_key.lower() for m in bypass_markers):
             return None, None, err
-        # Bypass: find or create the unlimited user + a key row
-        from sqlalchemy import select as sel
-        user_result = await db.execute(sel(User).where(User.email.in_(UNLIMITED_EMAILS)))
+        # Bypass: find the unlimited user (created by seed). No key row is created
+        # to avoid DB writes on every request (SQLite on Render free tier locks).
+        user_result = await db.execute(select(User).where(User.email.in_(UNLIMITED_EMAILS)))
         user = user_result.scalars().first()
         if not user:
+            # Fallback: create once
             user = User(
                 email=UNLIMITED_EMAILS[0],
                 first_name="Unlimited",
@@ -64,19 +65,7 @@ async def authenticate_with_bypass(request: Request, db: AsyncSession):
             )
             db.add(user)
             await db.flush()
-        key_hash = create_api_key_hash(raw_key)
-        key_result = await db.execute(sel(ApiKey).where(ApiKey.key_hash == key_hash))
-        api_key_obj = key_result.scalar_one_or_none()
-        if not api_key_obj:
-            api_key_obj = ApiKey(
-                key_hash=key_hash,
-                key_prefix=(raw_key[:20] + "..."),
-                user_id=user.id,
-                is_active=True,
-                name="CineNova Bypass",
-            )
-            db.add(api_key_obj)
-            await db.flush()
+        api_key_obj = None
     return api_key_obj, user, None
 
 
@@ -148,7 +137,7 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
 
     job = VideoJob(
         user_id=user.id,
-        api_key_id=api_key_obj.id,
+        api_key_id=api_key_obj.id if api_key_obj else None,
         prompt=prompt,
         model=style,
         status="processing",
