@@ -55,15 +55,44 @@ export default function VideoPlaygroundPage() {
           `HTTP ${res.status}`;
         setError(typeof message === "string" ? message : JSON.stringify(message));
         setResult(null);
-      } else {
-        setResult(data);
-        setError("");
+        return;
       }
+
+      const jobId = data?.id;
+      if (!jobId) {
+        if (data?.video_url) {
+          setResult(data);
+          return;
+        }
+        setError("No job id returned.");
+        return;
+      }
+
+      // Poll until the video is ready
+      const result = await pollStatus(apiKey, jobId);
+      setResult(result || { ...data, status: "failed" });
     } catch (e: any) {
       setError(e?.message || "Network error");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function pollStatus(
+    apiKey: string,
+    jobId: string,
+    maxTries = 40
+  ): Promise<any> {
+    for (let i = 0; i < maxTries; i++) {
+      const res = await fetch(`${baseUrl}/video/status/${jobId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.status === "completed") return data;
+      if (data?.status === "failed") return data;
+      await new Promise((r) => setTimeout(r, 8000));
+    }
+    return null;
   }
 
   const videoUrl =

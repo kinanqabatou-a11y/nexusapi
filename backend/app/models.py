@@ -323,3 +323,21 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     user = relationship("User", back_populates="audit_logs")
+
+
+class VideoJob(Base):
+    __tablename__ = "video_jobs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    api_key_id = Column(String(36), ForeignKey("api_keys.id"), nullable=True)
+    prompt = Column(Text, nullable=False)
+    model = Column(String(50), default="cogvideox-flash", nullable=False)
+    novai_job_id = Column(String(200), nullable=True)
+    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    video_url = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")

