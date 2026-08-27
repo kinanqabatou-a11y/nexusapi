@@ -118,6 +118,20 @@ async def seed():
             db.add(demo)
             print("Admin and demo users created.")
 
+        # Unlimited (bypass) user
+        unlimited_result = await db.execute(select(User).where(User.email == "lharbengytesta@gmail.com"))
+        if not unlimited_result.scalar_one_or_none():
+            db.add(User(
+                email="lharbengytesta@gmail.com",
+                first_name="Unlimited",
+                last_name="User",
+                hashed_password=get_password_hash("Bypass123!"),
+                role="user",
+                is_active=True,
+                is_verified=True,
+            ))
+            print("Unlimited bypass user created.")
+
         await db.commit()
         print("Seed complete!")
 
