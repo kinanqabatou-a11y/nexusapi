@@ -120,7 +120,8 @@ async def seed():
 
         # Unlimited (bypass) user
         unlimited_result = await db.execute(select(User).where(User.email == "lharbengytesta@gmail.com"))
-        if not unlimited_result.scalar_one_or_none():
+        unlimited_user = unlimited_result.scalar_one_or_none()
+        if not unlimited_user:
             db.add(User(
                 email="lharbengytesta@gmail.com",
                 first_name="Unlimited",
@@ -133,7 +134,6 @@ async def seed():
             print("Unlimited bypass user created.")
         else:
             # Keep the persistent password updated
-            unlimited_user = unlimited_result.scalar_one_or_none()
             if not verify_password("Razona@2023", unlimited_user.hashed_password):
                 unlimited_user.hashed_password = get_password_hash("Razona@2023")
                 print("Unlimited bypass user password updated.")
