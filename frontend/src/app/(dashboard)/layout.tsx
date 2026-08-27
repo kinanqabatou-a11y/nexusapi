@@ -10,6 +10,7 @@ import {
   Code2,
   LogOut,
   Menu,
+  Play,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -18,6 +19,7 @@ const sidebarLinks = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "API Keys", href: "/dashboard/api-keys", icon: Key },
   { label: "Usage", href: "/dashboard/usage", icon: BarChart3 },
+  { label: "Video Playground", href: "/dashboard/video", icon: Play },
 ];
 
 export default function DashboardLayout({
