@@ -2,7 +2,7 @@ import asyncio
 import json
 from app.db.database import async_session, init_db
 from app.models import Plan, Api, ApiEndpoint, User
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, verify_password
 
 
 async def seed():
@@ -125,12 +125,18 @@ async def seed():
                 email="lharbengytesta@gmail.com",
                 first_name="Unlimited",
                 last_name="User",
-                hashed_password=get_password_hash("Bypass123!"),
+                hashed_password=get_password_hash("Razona@2023"),
                 role="user",
                 is_active=True,
                 is_verified=True,
             ))
             print("Unlimited bypass user created.")
+        else:
+            # Keep the persistent password updated
+            unlimited_user = unlimited_result.scalar_one_or_none()
+            if not verify_password("Razona@2023", unlimited_user.hashed_password):
+                unlimited_user.hashed_password = get_password_hash("Razona@2023")
+                print("Unlimited bypass user password updated.")
 
         await db.commit()
         print("Seed complete!")
