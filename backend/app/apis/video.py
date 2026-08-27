@@ -97,7 +97,7 @@ async def generate_video(request: Request, db: AsyncSession = Depends(get_db)):
             existing = await db.execute(sel(ApiKeyModel).where(ApiKeyModel.key_hash == key_hash))
             api_key_obj = existing.scalar_one_or_none()
             if not api_key_obj:
-                api_key_obj = ApiKeyModel(key_hash=key_hash, user_id=user.id, is_active=True, name="CineNova Bypass")
+                api_key_obj = ApiKeyModel(key_hash=key_hash, key_prefix=(raw_key[:20] + "..."), user_id=user.id, is_active=True, name="CineNova Bypass")
                 db.add(api_key_obj)
                 await db.flush()
         else:
